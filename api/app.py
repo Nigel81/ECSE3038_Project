@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Response, Query
+from fastapi import FastAPI, HTTPException, Response, Query, status
 from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel, Field, ValidationError
 from datetime import datetime, timedelta, time, timezone, date
@@ -18,16 +18,15 @@ sensor_data = []
 max_storage = 500
 
 LOCAL_TIME = tzlocal.get_localzone()
-#UTC = timezone.utc
 DEFAULT_SUNSET = "18:45"
-LAT = 17.074656
-LONG = -61.817520 # location of Antigua and Barbuda
+LAT = 17.074656   # Lat location of Antigua and Barbuda
+LONG = -61.817520 # Long location of Antigua and Barbuda
 sunset_cache = {}
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://simple-smart-hub-client.netlify.app"],  # Your frontend URL
-    allow_methods=["GET", "PUT", "OPTIONS"],  # Explicitly allow GET and OPTIONS
+    allow_origins=["https://simple-smart-hub-client.netlify.app"],  #Webpage
+    allow_methods=["GET", "PUT", "OPTIONS"],  # allow GET, PUT and OPTIONS
     allow_headers=["*"],
 )
 
@@ -35,7 +34,6 @@ class Settings(BaseModel):
     id: UUID = Field(default_factory=uuid4)
     user_temp: int
     user_light: str 
-    #light_time_off: timedelta
     light_duration: str
     lat: float | None = None
     lng: float | None = None
@@ -43,8 +41,8 @@ class Settings(BaseModel):
 class Graph(BaseModel):
     temperature: float 
     presence: bool 
-    #date_time:datetime = Field(default_factory=datetime.utcnow)
     date_time:datetime = Field(default_factory=lambda: datetime.now(LOCAL_TIME))
+
 class GraphResponse(BaseModel):
     temperature: float 
     presence: bool
@@ -58,11 +56,12 @@ async def user_settings(settings_request:Settings):
             settings_request.lng = LONG
         settings_request.user_light = await get_sunset_time(settings_request.lat, settings_request.lng)
 
-    tempo_light = get_user_light_timedelta(settings_request.user_light)
-    tempo_duration = settings_request.light_duration
-
-    time_off = parse_time(tempo_duration)
-    time_off = time_off + tempo_light
+    try: 
+        tempo_light = get_user_light_timedelta(settings_request.user_light)
+        time_off = parse_time(settings_request.light_duration)
+        time_off = time_off + tempo_light
+    except ValueError as e:
+        raise HTTPException(status_code=400,detail=str(e))
     
     storage = {
         "id": settings_request.id,
@@ -71,11 +70,11 @@ async def user_settings(settings_request:Settings):
         "light_time_off": format_timedelta(time_off)
     }
 
-    smart_hub_data.clear() #make room for new user settings
+    report = status.HTTP_200_OK if smart_hub_data else status.HTTP_201_CREATED #check for previous settings
+    smart_hub_data.clear() #replace settings
     smart_hub_data.append(storage)
-    return storage
-        #"message": "Settings stored successfully"
-
+    return JSONResponse(content=jsonable_encoder(storage), status_code=report)
+        
 @app.post("/sensors_data")
 async def process_sensor_data(output_request: Graph):
     try:
@@ -108,13 +107,21 @@ async def process_sensor_data(output_request: Graph):
                 light_on_time,
                 tzinfo=LOCAL_TIME
                 )
+            if light_off_time <= light_on_time:   # check to see if time crosses midnight
+                light_off_date = output_request.date_time.date() + timedelta(days=1)
+            else:
+                light_off_date = output_request.date_time.date()
+
+            # Combine with adjusted date
             light_off_datetime = datetime.combine(
-                output_request.date_time.date(),
-                light_off_time,
-                tzinfo=LOCAL_TIME
-            )
-            if light_on_time > light_off_time:
-                light_off_datetime += timedelta(days=1)
+                light_off_date,
+                light_off_time
+            ).replace(tzinfo=LOCAL_TIME)
+
+            # Debugging (optional but recommended)
+            print("Datetime now:", output_request.date_time)
+            print("Light ON at:", light_on_datetime)
+            print("Light OFF at:", light_off_datetime)
 
             if light_on_datetime <= output_request.date_time <= light_off_datetime:
                 light_on = True
@@ -129,9 +136,10 @@ async def process_sensor_data(output_request: Graph):
 regex = re.compile(r'((?P<hours>\d+?)h)?((?P<minutes>\d+?)m)?((?P<seconds>\d+?)s)?')  
 
 def parse_time(time_str):
+    """Convert duration str to time duration"""
     parts = regex.match(time_str)
     if not parts:
-        raise ValueError("Invalid duration format")
+        raise ValueError("invalid duration format")
     parts = parts.groupdict()
     time_params = {}
     for name, param in parts.items():
@@ -165,6 +173,7 @@ def get_user_light_timedelta(user_light) -> timedelta:
         raise ValueError("Invalid user_light format")
 
 async def get_sunset_time(lat: float, lng: float) -> str:
+    """Get sunset time"""
     today = date.today()
     cache_key = (round(lat, 4), round(lng, 4), today)
     if cache_key in sunset_cache:
@@ -184,7 +193,7 @@ async def get_sunset_time(lat: float, lng: float) -> str:
                 sunset_cache[cache_key] = sunset_str
                 return sunset_str
             else:
-                raise ValueError(f"Sunset api return a bad status: {data["status"]}")
+                raise ValueError(f"Sunset API returned a bad status: {data['status']}")
     except Exception as e:
         fall_back = DEFAULT_SUNSET
         sunset_cache[cache_key] = fall_back
@@ -203,7 +212,7 @@ async def daily_cache_cleaner():
 async def start_background_tasks():
     asyncio.create_task(daily_cache_cleaner())
 
-@app.get("/graph", response_model=List[GraphResponse])
+@app.get("/graph", response_model=List[GraphResponse]) 
 async def get_graph_data(size: int = Query(..., gt=0, le=max_storage, description="Number of objects to return (1-500)")):
     
     if not sensor_data:
@@ -225,7 +234,7 @@ async def get_graph_data(size: int = Query(..., gt=0, le=max_storage, descriptio
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     
-@app.get("/settings")   #for debugging purposes
+@app.get("/settings")   #For debugging purposes
 async def get_settings():
     if not smart_hub_data:
         raise HTTPException(404, "No settings found")

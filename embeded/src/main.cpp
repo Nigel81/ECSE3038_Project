@@ -1,7 +1,7 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <HTTPClient.h>
-#include "C:\Users\Teacher\Documents\PlatformIO\Projects\ECSE3038_project_final1\embeded\env.h"
+#include "env.h"
 #include <ArduinoJson.h>
 #include <OneWire.h>
 #include <DallasTemperature.h>
@@ -13,10 +13,6 @@
 #define PIR 15
 
 bool presence = true;
-
-/*const char * SSID = "Verizon-SM-A515U-B068";
-const char * PASS = "1234567890";
-const char * ENDPOINT = "http://192.168.156.221:8000";*/
 
 //one wire sensor
 OneWire oneWire(ONE_WIRE_BUS);
@@ -46,7 +42,7 @@ void setup() {
   sensor.begin();
   sensor.setResolution(12);
   sensor.setOffset(0.25);
-  Serial.println("Hello ESP32!");
+  Serial.println("Welcome to Smart Hub 2.0");
   Serial.println(SSID);
   Serial.println(PASS);
   WiFi.begin(SSID,PASS);
@@ -83,6 +79,7 @@ void loop() {
   }
   else{
     Serial.println("WiFi connection Lost");
+    WiFi.reconnect();
   }
   delay(1000);
 }
@@ -92,7 +89,6 @@ void send_temp(float acquired_temp){
   http.addHeader("Content-Type", "application/json");
 
   JsonDocument object_1;
-  //StaticJsonDocument<256> object_1;
   object_1["temperature"] = acquired_temp;
   object_1["presence"] = presence;
 
@@ -100,7 +96,7 @@ void send_temp(float acquired_temp){
   serializeJson(object_1,request_body);
   
   int responseCode = http.POST(request_body);
-  if(responseCode == HTTP_CODE_OK || responseCode == 200)
+  if(responseCode == HTTP_CODE_OK)
   {
     String response = http.getString();
     Serial.print("API Response: ");
