@@ -63,12 +63,7 @@ async def user_settings(settings_request:Settings):
 
     time_off = parse_time(tempo_duration)
     time_off = time_off + tempo_light
-    # storage = {"settings":settings_request,"light_time_off":time_off}
-    # time_off1 = format_timedelta(time_off)
-    # storage1 = settings_request.dict()
-    # storage1 ["light_time_off"] = time_off1 #time_off
-    # del storage1["light_duration"]
-    # storage1["user_light"] = format_timedelta(tempo_light)
+    
     storage = {
         "id": settings_request.id,
         "user_temp": settings_request.user_temp,
@@ -83,20 +78,17 @@ async def user_settings(settings_request:Settings):
 
 @app.post("/sensors_data")
 async def process_sensor_data(output_request: Graph):
-    # if not smart_hub_data:
-    #         raise HTTPException(status_code=400, detail="Settings not found")
     try:
         
         sensor_data.insert(0, output_request)
         if len(sensor_data) > max_storage:
             sensor_data.pop()
-        #settings = smart_hub_data[-1]
+        
         if smart_hub_data:
             settings = smart_hub_data[-1]
-            #light_time_off = settings["light_time_off"]
             fan_status = "on" if (output_request.temperature >= settings["user_temp"] and output_request.presence) else "off"
 
-            #current_time = output_request.date_time.time()
+            
             light_on_time = time.fromisoformat(settings["user_light"])  
             light_off_time = time.fromisoformat(settings["light_time_off"])
             # light_on_time = time(
@@ -135,17 +127,6 @@ async def process_sensor_data(output_request: Graph):
         raise HTTPException(status_code=422, detail=jsonable_encoder(e.errors()))
 
 regex = re.compile(r'((?P<hours>\d+?)h)?((?P<minutes>\d+?)m)?((?P<seconds>\d+?)s)?')  
-
-# def parse_time(time_str):
-#     parts = regex.match(time_str)
-#     if not parts:
-#         return
-#     parts = parts.groupdict()
-#     time_params = {}
-#     for name, param in parts.items():
-#         if param:
-#             time_params[name] = int(param)
-#     return timedelta(**time_params)
 
 def parse_time(time_str):
     parts = regex.match(time_str)
@@ -191,10 +172,10 @@ async def get_sunset_time(lat: float, lng: float) -> str:
 
     url = "https://api.sunrise-sunset.org/json"
     params = {"lat": lat, "lng": lng, "formatted": 0}
-
-    async with httpx.AsyncClient() as client:
-        response = await client.get(url, params=params)
-        if response.status_code == 200:
+    
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url, params=params)
             data = response.json()
             if data["status"] == "OK":
                 sunset_utc = data["results"]["sunset"]
@@ -203,9 +184,12 @@ async def get_sunset_time(lat: float, lng: float) -> str:
                 sunset_cache[cache_key] = sunset_str
                 return sunset_str
             else:
-                raise HTTPException(500, detail=f"Sunset API error: {data['status']}")
-        else:
-            raise HTTPException(response.status_code, detail="Failed to fetch sunset time")
+                raise ValueError(f"Sunset api return a bad status: {data["status"]}")
+    except Exception as e:
+        fall_back = DEFAULT_SUNSET
+        sunset_cache[cache_key] = fall_back
+        print(f"Failed to fetch sunset time, default used")
+        return fall_back
 
 async def daily_cache_cleaner():
     while True:
@@ -230,13 +214,8 @@ async def get_graph_data(size: int = Query(..., gt=0, le=max_storage, descriptio
         # Determine the slice of data to return
         data = sensor_data[:min(size, len(sensor_data))]
         
-        #if not latest_first:
-        #    data = reversed(data)
         return [
             {
-                # "temperature": round(random.uniform(15.0, 35.0), 1),
-                # "presence": random.choice([True, False]),
-                # "datetime": datetime.utcnow()
                 "temperature": item.temperature,
                 "presence": item.presence,
                 "datetime": item.date_time
