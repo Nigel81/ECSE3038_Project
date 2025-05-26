@@ -220,7 +220,7 @@ async def start_background_tasks():
     asyncio.create_task(daily_cache_cleaner())
 
 @app.get("/graph", response_model=List[GraphResponse])
-async def get_graph_data(size: int = Query(..., gt=0, le=max_storage, description="Number of objects to return (1-1000)")):
+async def get_graph_data(size: int = Query(..., gt=0, le=max_storage, description="Number of objects to return (1-500)")):
     
     if not sensor_data:
         raise HTTPException(status_code=404, detail="No sensor data available")
