@@ -98,35 +98,35 @@ async def process_sensor_data(output_request: Graph):
             #     hour=light_time_off.seconds // 3600,
             #     minute=(light_time_off.seconds % 3600) // 60
             # )
-            # if light_on_time <= light_off_time:
-            #     light_on = light_on_time <= current_time <= light_off_time
+            if light_on_time <= light_off_time:
+                light_on = light_on_time <= output_request.date_time.time() <= light_off_time
+            else:
+                light_on = light_on_time <= output_request.date_time.time() or output_request.date_time.time() <= light_off_time
+            # light_on_datetime = datetime.combine(
+            #     output_request.date_time.date(), 
+            #     light_on_time,
+            #     tzinfo=LOCAL_TIME
+            #     )
+            # if light_off_time <= light_on_time:   # check to see if time crosses midnight
+            #     light_off_date = output_request.date_time.date() + timedelta(days=1)
             # else:
-            #     light_on = light_on_time <= current_time or current_time <= light_off_time
-            light_on_datetime = datetime.combine(
-                output_request.date_time.date(), 
-                light_on_time,
-                tzinfo=LOCAL_TIME
-                )
-            if light_off_time <= light_on_time:   # check to see if time crosses midnight
-                light_off_date = output_request.date_time.date() + timedelta(days=1)
-            else:
-                light_off_date = output_request.date_time.date()
+            #     light_off_date = output_request.date_time.date()
 
-            # Combine with adjusted date
-            light_off_datetime = datetime.combine(
-                light_off_date,
-                light_off_time
-            ).replace(tzinfo=LOCAL_TIME)
+            # # Combine with adjusted date
+            # light_off_datetime = datetime.combine(
+            #     light_off_date,
+            #     light_off_time
+            # ).replace(tzinfo=LOCAL_TIME)
 
-            # Debugging (optional but recommended)
-            print("Datetime now:", output_request.date_time)
-            print("Light ON at:", light_on_datetime)
-            print("Light OFF at:", light_off_datetime)
+            # # Debugging (optional but recommended)
+            # print("Datetime now:", output_request.date_time)
+            # print("Light ON at:", light_on_datetime)
+            # print("Light OFF at:", light_off_datetime)
 
-            if light_on_datetime <= output_request.date_time <= light_off_datetime:
-                light_on = True
-            else:
-                light_on = False
+            # if light_on_datetime <= output_request.date_time <= light_off_datetime:
+            #     light_on = True
+            # else:
+            #     light_on = False
             light = "on" if (output_request.presence and light_on) else "off"
             return {"fan": fan_status, "light":light}
         else: return {"fan": "off", "light": "off", "settings":"none"}
