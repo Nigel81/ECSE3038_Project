@@ -10,12 +10,18 @@ import tzlocal
 import asyncio
 import httpx
 from fastapi.middleware.cors import CORSMiddleware
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
 
 app = FastAPI()
 
+scheduler = AsyncIOScheduler()
 smart_hub_data = []
 sensor_data = [] 
 max_storage = 500
+time_off = timedelta()
+flag = 0
+event_loop = None
 
 LOCAL_TIME = tzlocal.get_localzone()
 DEFAULT_SUNSET = "18:45"
@@ -50,11 +56,15 @@ class GraphResponse(BaseModel):
 
 @app.put("/settings")
 async def user_settings(settings_request:Settings):
+    global flag, time_off
     if settings_request.user_light.lower() == "sunset":
+        flag = 1
         if settings_request.lat is None or settings_request.lng is None:
             settings_request.lat = LAT
             settings_request.lng = LONG
         settings_request.user_light = await get_sunset_time(settings_request.lat, settings_request.lng)
+    else:
+        flag = 0
 
     try: 
         tempo_light = get_user_light_timedelta(settings_request.user_light)
@@ -88,8 +98,11 @@ async def process_sensor_data(output_request: Graph):
             fan_status = "on" if (output_request.temperature >= settings["user_temp"] and output_request.presence) else "off"
 
             
-            light_on_time = time.fromisoformat(settings["user_light"])  
-            light_off_time = time.fromisoformat(settings["light_time_off"])
+            light_on_time = get_user_light_timedelta(settings["user_light"])  
+            light_off_time = get_user_light_timedelta(settings["light_time_off"])
+            current_time = timedelta(hours=output_request.date_time.hour, 
+                                     minutes=output_request.date_time.minute, 
+                                     seconds=output_request.date_time.second)
             # light_on_time = time(
             #     hour=settings.user_light.seconds // 3600,
             #     minute=(settings.user_light.seconds % 3600) // 60
@@ -99,34 +112,10 @@ async def process_sensor_data(output_request: Graph):
             #     minute=(light_time_off.seconds % 3600) // 60
             # )
             if light_on_time <= light_off_time:
-                light_on = light_on_time <= output_request.date_time.time() <= light_off_time
+                light_on = light_on_time <= current_time <= light_off_time
             else:
-                light_on = light_on_time <= output_request.date_time.time() or output_request.date_time.time() <= light_off_time
-            # light_on_datetime = datetime.combine(
-            #     output_request.date_time.date(), 
-            #     light_on_time,
-            #     tzinfo=LOCAL_TIME
-            #     )
-            # if light_off_time <= light_on_time:   # check to see if time crosses midnight
-            #     light_off_date = output_request.date_time.date() + timedelta(days=1)
-            # else:
-            #     light_off_date = output_request.date_time.date()
-
-            # # Combine with adjusted date
-            # light_off_datetime = datetime.combine(
-            #     light_off_date,
-            #     light_off_time
-            # ).replace(tzinfo=LOCAL_TIME)
-
-            # # Debugging (optional but recommended)
-            # print("Datetime now:", output_request.date_time)
-            # print("Light ON at:", light_on_datetime)
-            # print("Light OFF at:", light_off_datetime)
-
-            # if light_on_datetime <= output_request.date_time <= light_off_datetime:
-            #     light_on = True
-            # else:
-            #     light_on = False
+                light_on = light_on_time <= current_time or current_time <= light_off_time
+            
             light = "on" if (output_request.presence and light_on) else "off"
             return {"fan": fan_status, "light":light}
         else: return {"fan": "off", "light": "off", "settings":"none"}
@@ -158,17 +147,17 @@ def format_timedelta(td: timedelta) -> str:
     minutes, seconds = divmod(remainder, 60)
     return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
 
-def get_user_light_timedelta(user_light) -> timedelta:
-    """Convert user_light (either string or timedelta) to timedelta"""
-    if isinstance(user_light, str):
-        t = time.fromisoformat(user_light)
+def get_user_light_timedelta(light) -> timedelta:
+    """Convert user_light or other(either string or timedelta) to timedelta"""
+    if isinstance(light, str):
+        t = time.fromisoformat(light)
         return timedelta(
             hours=t.hour,
             minutes=t.minute,
             seconds=t.second
         )
-    elif isinstance(user_light, timedelta):
-        return user_light
+    elif isinstance(light, timedelta):
+        return light
     else:
         raise ValueError("Invalid user_light format")
 
@@ -200,17 +189,35 @@ async def get_sunset_time(lat: float, lng: float) -> str:
         print(f"Failed to fetch sunset time, default used")
         return fall_back
 
-async def daily_cache_cleaner():
-    while True:
-        await asyncio.sleep(86400)  
-        today = date.today()
-        keys_to_delete = [key for key in sunset_cache if key[2] != today]
-        for key in keys_to_delete:
-            del sunset_cache[key]
+def daily_cache_cleaner(): 
+    today = date.today()
+    keys_to_delete = [key for key in sunset_cache if key[2] != today]
+    for key in keys_to_delete:
+        del sunset_cache[key]
         
 @app.on_event("startup")
-async def start_background_tasks():
-    asyncio.create_task(daily_cache_cleaner())
+async def on_startup():
+    global event_loop
+    event_loop = asyncio.get_running_loop()
+    daily_cache_cleaner()
+    scheduler.add_job(
+        lambda: asyncio.run_coroutine_threadsafe(update_sunset(), event_loop),
+        CronTrigger(hour=22, minute=20)
+    )
+    scheduler.add_job(daily_cache_cleaner, CronTrigger(hour=3))
+    scheduler.start()
+
+@app.on_event("shutdown")
+def shutdown_event():
+    scheduler.shutdown()
+
+async def update_sunset():
+    global flag, time_off
+    if flag and smart_hub_data:
+        new_sunset = await get_sunset_time(LAT, LONG)
+        smart_hub_data[-1]["user_light"] =  format_timedelta(get_user_light_timedelta(new_sunset))
+        smart_hub_data[-1]["light_time_off"] = format_timedelta(get_user_light_timedelta(new_sunset) + time_off)
+        print(f"sunset updated")
 
 @app.get("/graph", response_model=List[GraphResponse]) 
 async def get_graph_data(size: int = Query(..., gt=0, le=max_storage, description="Number of objects to return (1-500)")):

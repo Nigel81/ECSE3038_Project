@@ -14,6 +14,9 @@
   <user_temp> There not calculation
   <light_duration> The Api receives a str of either hours, minutes or seconds. It is then converted to timedelta using the parse_time function. The light off time is calculated by adding user_light with the light duration. The user_temp, user_light and light off time is stored in smart hub data array. Additionally, the data stored is returned for view.
 
+- Automatic sunset update
+  When the user selects sunset, a flag is raise to trigger automatic update of sunset each day at a set time determined by a schedule background task.
+
 **ESP32**
 - The ESP32 collects temperature reading of the room and presence reading and send it to the API.
 - The ESP32 reads the response of the API and turns on or off the light and fan based on the response of the API

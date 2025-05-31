@@ -81,7 +81,7 @@ void loop() {
     Serial.println("WiFi connection Lost");
     WiFi.reconnect();
   }
-  delay(1000);
+  delay(500);
 }
 void send_temp(float acquired_temp){
   HTTPClient http;
@@ -117,7 +117,7 @@ void send_temp(float acquired_temp){
         Serial.println("Cooling the place down");
       } else {
         digitalWrite(FAN,LOW);
-        Serial.println("Place is cool");
+        Serial.println("Place is cool or no movements detected");
       }
 
       if(strcmp(light,"on")== 0){
