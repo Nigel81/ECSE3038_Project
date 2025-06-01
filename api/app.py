@@ -202,7 +202,7 @@ async def on_startup():
     daily_cache_cleaner()
     scheduler.add_job(
         lambda: asyncio.run_coroutine_threadsafe(update_sunset(), event_loop),
-        CronTrigger(hour=22, minute=20)
+        CronTrigger(hour=2)
     )
     scheduler.add_job(daily_cache_cleaner, CronTrigger(hour=3))
     scheduler.start()

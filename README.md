@@ -16,6 +16,7 @@
 
 - Automatic sunset update
   When the user selects sunset, a flag is raise to trigger automatic update of sunset each day at a set time determined by a schedule background task.
+- Once in a blue moon in a while shutting down the server may throw an error, however this error has nothing to with the api but Windows asyncio quirk based on research. Hence, it was ignored.
 
 **ESP32**
 - The ESP32 collects temperature reading of the room and presence reading and send it to the API.
